@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ka">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ქართული მართლწერის შემოწმება</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🇬🇪 ქართული მართლწერის შემოწმება</h1>
+            <p>AI-ზე დაფუძნებული მეთოდებით</p>
+        </div>
+        
+        <div class="main-content">
+            <!-- ტექსტის ნაწილი -->
+            <div class="text-section">
+                <div class="textarea-container">
+                    <div id="editableText" 
+                         class="editable-text" 
+                         contenteditable="true"
+                         placeholder="შეიყვანეთ ქართული ტექსტი შესამოწმებლად...&#10;მაგალითი: გამარჯობა, როგორ ხარ? ეს არის სატესტო ტექსტი.">
+                    </div>
+                </div>
+                
+                <div class="loading" id="loading">
+                    <div class="spinner"></div>
+                    <p>მიმდინარეობს ტექსტის შემოწმება...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- კონტექსტური მენიუ შეცდომებისთვის -->
+    <div id="contextMenu" class="context-menu" style="display: none;">
+        <div class="context-menu-header">
+            <span>შეცდომის გამოსწორება</span>
+            <button class="close-btn" onclick="hideContextMenu()">×</button>
+        </div>
+        <div class="context-menu-content">
+            <div id="errorWord" class="error-word"></div>
+            <div class="suggestions-title">შემოთავაზებები:</div>
+            <div id="suggestionsList" class="suggestions-list"></div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
