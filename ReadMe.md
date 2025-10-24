@@ -370,6 +370,6 @@ pip install flask beautifulsoup4 requests
 - `4_advanced/` - Advanced N-gram models
 - `5_web/` - Web interface
 
-git add .
-git commit -m "feat: Describe your changes"
-git push origin main
+- git add .
+- git commit -m "  "
+- git push origin main

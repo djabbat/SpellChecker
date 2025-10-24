@@ -1,512 +1,360 @@
-# web_interface.py
 #!/usr/bin/env python3
 """
-Веб-интерфейс для грузинского спеллчекера
+Главный скрипт для полной сборки грузинского спеллчекера
+Запускает все процессы: сбор корпуса, обучение моделей, объединение базовой и продвинутой версий
 """
 
-from flask import Flask, render_template, request, jsonify
-import pickle
-from collections import Counter
-import re
 import os
+import sys
+import pickle
+import time
 from pathlib import Path
+import subprocess
+import shutil
 
-app = Flask(__name__)
+# Добавляем пути для импорта модулей
+project_root = Path(__file__).parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(project_root / "2_basis"))
+sys.path.insert(0, str(project_root / "4_advanced"))
 
-class WebSpellChecker:
-    def __init__(self):
-        self.vocabulary = set()
-        self.word_freq = Counter()
-        self.load_or_create_model()
+def print_step(step_number, description):
+    """Красивый вывод шагов процесса"""
+    print(f"\n{'='*60}")
+    print(f"🚀 ШАГ {step_number}: {description}")
+    print(f"{'='*60}")
+
+def run_python_script(script_path, args=None):
+    """Запуск Python скрипта"""
+    if args is None:
+        args = []
     
-    def load_or_create_model(self):
-        """Загружает модель или создает базовую"""
-        model_path = "spellchecker_model.pkl"
+    script_full_path = project_root / script_path
+    if not script_full_path.exists():
+        print(f"❌ Скрипт не найден: {script_path}")
+        return False
+    
+    try:
+        cmd = [sys.executable, str(script_full_path)] + args
+        print(f"📝 Запуск: {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=project_root)
         
-        if os.path.exists(model_path):
-            try:
-                with open(model_path, 'rb') as f:
-                    data = pickle.load(f)
-                self.vocabulary = set(data['vocabulary'])
-                self.word_freq = Counter(data['word_freq'])
-                print(f"✅ Модель загружена. Слов: {len(self.vocabulary)}")
-                return
-            except Exception as e:
-                print(f"❌ Ошибка загрузки модели: {e}")
+        if result.returncode == 0:
+            print(f"✅ Успешно: {script_path}")
+            if result.stdout:
+                print(f"📋 Вывод: {result.stdout}")
+            return True
+        else:
+            print(f"❌ Ошибка в {script_path}:")
+            print(f"stderr: {result.stderr}")
+            print(f"stdout: {result.stdout}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Исключение при запуске {script_path}: {e}")
+        return False
+
+def ensure_directories():
+    """Создание необходимых директорий"""
+    directories = [
+        "1_collect/corpus",
+        "2_basis/processed_corpus", 
+        "2_basis/hunspell_georgian",
+        "4_advanced",
+        "5_web/static/css",
+        "5_web/static/js",
+        "5_web/templates"
+    ]
+    
+    for dir_path in directories:
+        full_path = project_root / dir_path
+        full_path.mkdir(parents=True, exist_ok=True)
+        print(f"📁 Создана директория: {dir_path}")
+
+def collect_corpus():
+    """Сбор корпуса текстов"""
+    print_step(1, "СБОР ТЕКСТОВОГО КОРПУСА")
+    
+    # Проверяем, есть ли уже корпус
+    corpus_dir = project_root / "1_collect" / "corpus"
+    if corpus_dir.exists() and any(corpus_dir.iterdir()):
+        print("📚 Корпус уже существует, пропускаем сбор...")
+        return True
+    
+    print("📥 Сбор корпуса с веб-сайтов...")
+    return run_python_script("1_collect/corpus.py")
+
+def build_basic_model():
+    """Построение базовой модели"""
+    print_step(2, "ПОСТРОЕНИЕ БАЗОВОЙ МОДЕЛИ")
+    
+    # Запускаем базовый спеллчекер в режиме обучения
+    success = run_python_script("2_basis/georgian_spellchecker.py", ["--build"])
+    
+    if not success:
+        print("🔄 Альтернативный метод: обучение базовой модели...")
+        success = run_python_script("2_basis/georgian_spellchecker.py", ["--train"])
+    
+    return success
+
+def expand_corpus():
+    """Расширение корпуса"""
+    print_step(3, "РАСШИРЕНИЕ КОРПУСА")
+    
+    # Проверяем, нужно ли расширять корпус
+    corpus_dir = project_root / "1_collect" / "corpus"
+    txt_files = list(corpus_dir.glob("*.txt"))
+    
+    if len(txt_files) < 10:  # Если мало файлов, расширяем
+        print("📈 Расширение корпуса дополнительными текстами...")
+        return run_python_script("3_expand/expand_corpus.py")
+    else:
+        print(f"📚 Корпус содержит {len(txt_files)} файлов, расширение не требуется")
+        return True
+
+def build_advanced_model():
+    """Построение продвинутой модели"""
+    print_step(4, "ПОСТРОЕНИЕ ПРОДВИНУТОЙ МОДЕЛИ")
+    
+    # Проверяем существование базовой модели
+    basic_model_path = project_root / "2_basis" / "georgian_spellchecker.pkl"
+    if not basic_model_path.exists():
+        print("❌ Базовая модель не найдена! Сначала выполните шаг 2.")
+        return False
+    
+    print("🧠 Построение продвинутой модели с N-gram...")
+    return run_python_script("4_advanced/advanced_spellchecker.py", ["--build"])
+
+def merge_models():
+    """Объединение базовой и продвинутой моделей"""
+    print_step(5, "ОБЪЕДИНЕНИЕ МОДЕЛЕЙ")
+    
+    try:
+        # Импортируем классы моделей
+        from georgian_spellchecker import GeorgianSpellChecker
+        from advanced_spellchecker import AdvancedGeorgianSpellChecker
         
-        # Создаем базовую модель
-        print("📝 Создаем базовую модель...")
-        self.vocabulary = {
+        print("🔄 Загрузка базовой модели...")
+        basic_model = GeorgianSpellChecker()
+        basic_model_path = project_root / "2_basis" / "georgian_spellchecker.pkl"
+        
+        if basic_model_path.exists():
+            basic_model.load_model(str(basic_model_path))
+            print(f"✅ Базовая модель загружена: {len(basic_model.vocabulary)} слов")
+        else:
+            print("❌ Базовая модель не найдена!")
+            return False
+        
+        print("🔄 Загрузка продвинутой модели...")
+        advanced_model = AdvancedGeorgianSpellChecker()
+        advanced_model_path = project_root / "4_advanced" / "advanced_georgian_spellchecker.pkl"
+        
+        if advanced_model_path.exists():
+            advanced_model.load_advanced_model(str(advanced_model_path))
+            print(f"✅ Продвинутая модель загружена: {len(advanced_model.vocabulary)} слов")
+            
+            # Объединяем словари
+            print("🔗 Объединение словарей...")
+            merged_vocabulary = basic_model.vocabulary.union(advanced_model.vocabulary)
+            merged_word_freq = basic_model.word_freq.copy()
+            
+            # Обновляем частоты из продвинутой модели
+            for word, freq in advanced_model.word_freq.items():
+                if word in merged_word_freq:
+                    merged_word_freq[word] += freq
+                else:
+                    merged_word_freq[word] = freq
+            
+            # Создаем объединенную модель
+            print("🏗️ Создание объединенной модели...")
+            merged_model = AdvancedGeorgianSpellChecker()
+            merged_model.vocabulary = merged_vocabulary
+            merged_model.word_freq = merged_word_freq
+            
+            # Копируем N-gram модели из продвинутой версии
+            if hasattr(advanced_model, 'bigram_model'):
+                merged_model.bigram_model = advanced_model.bigram_model
+                print(f"✅ Биграммы: {sum(len(v) for v in advanced_model.bigram_model.values())}")
+            
+            if hasattr(advanced_model, 'trigram_model'):
+                merged_model.trigram_model = advanced_model.trigram_model
+                print(f"✅ Триграммы: {sum(len(v) for v in advanced_model.trigram_model.values())}")
+            
+            # Сохраняем объединенную модель
+            merged_model_path = project_root / "4_advanced" / "merged_georgian_spellchecker.pkl"
+            merged_model.save_advanced_model(str(merged_model_path))
+            
+            print(f"✅ Объединенная модель сохранена: {merged_model_path}")
+            print(f"📊 Итоговый словарь: {len(merged_vocabulary)} слов")
+            
+            # Копируем объединенную модель в веб-папку для использования
+            web_model_path = project_root / "5_web" / "merged_georgian_spellchecker.pkl"
+            shutil.copy2(merged_model_path, web_model_path)
+            print(f"🌐 Модель скопирована для веб-интерфейса: {web_model_path}")
+            
+            return True
+        else:
+            print("❌ Продвинутая модель не найдена!")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Ошибка при объединении моделей: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def create_fallback_model():
+    """Создание резервной модели если основные не работают"""
+    print_step(6, "СОЗДАНИЕ РЕЗЕРВНОЙ МОДЕЛИ")
+    
+    try:
+        from advanced_spellchecker import AdvancedGeorgianSpellChecker
+        
+        # Создаем базовый словарь
+        basic_words = {
             'გამარჯობა', 'როგორ', 'ხარ', 'დღეს', 'კარგი', 'ამინდი', 
             'საქართველო', 'თბილისი', 'ენა', 'პროგრამა', 'კომპიუტერი',
             'ძალიან', 'ლამაზი', 'ქალაქი', 'ტურისტი', 'წერს', 'კოდი',
+            'პითონი', 'ტექსტი', 'შეცდომა', 'სწორი', 'შემოწმება', 'ბგერა',
             'სალამი', 'ბარი', 'ჰეი', 'მაშინ', 'შემდეგ', 'ადრე', 'გვიან',
             'დიდი', 'პატარა', 'ახალი', 'ძველი', 'სწრაფი', 'ნელი', 'ცხელი',
             'ცივი', 'თეთრი', 'შავი', 'წითელი', 'მწვანე', 'ლურჯი', 'ყვითელი',
             'სტუდენტი', 'მასწავლებელი', 'სკოლა', 'უნივერსიტეტი', 'წიგნი',
             'ფული', 'სამუშაო', 'ოჯახი', 'მეგობარი', 'სიყვარული', 'ცხოვრება'
         }
-        self.word_freq = Counter(self.vocabulary)
         
-        # Сохраняем модель
-        self.save_model(model_path)
-    
-    def save_model(self, filename):
-        """Сохраняет модель"""
-        with open(filename, 'wb') as f:
-            pickle.dump({
-                'vocabulary': list(self.vocabulary),
-                'word_freq': dict(self.word_freq)
-            }, f)
-        print(f"💾 Модель сохранена: {filename}")
-    
-    def levenshtein_distance(self, s1, s2):
-        """Расстояние Левенштейна"""
-        if len(s1) < len(s2):
-            return self.levenshtein_distance(s2, s1)
-        if len(s2) == 0:
-            return len(s1)
-        previous_row = list(range(len(s2) + 1))
-        for i, c1 in enumerate(s1):
-            current_row = [i + 1]
-            for j, c2 in enumerate(s2):
-                insertions = previous_row[j + 1] + 1
-                deletions = current_row[j] + 1
-                substitutions = previous_row[j] + (c1 != c2)
-                current_row.append(min(insertions, deletions, substitutions))
-            previous_row = current_row
-        return previous_row[-1]
-    
-    def is_correct(self, word):
-        """Проверяет правильность слова"""
-        return word in self.vocabulary
-    
-    def suggest_corrections(self, word, max_suggestions=5):
-        """Предлагает исправления"""
-        if self.is_correct(word):
-            return [word]
+        fallback_model = AdvancedGeorgianSpellChecker()
+        fallback_model.vocabulary = basic_words
+        fallback_model.word_freq = {word: 1 for word in basic_words}
         
-        candidates = []
-        for candidate in self.vocabulary:
-            distance = self.levenshtein_distance(word, candidate)
-            if distance <= 2:
-                candidates.append((candidate, distance))
+        # Сохраняем резервную модель
+        fallback_path = project_root / "5_web" / "fallback_spellchecker.pkl"
+        fallback_model.save_advanced_model(str(fallback_path))
         
-        # Сортируем по расстоянию и частоте
-        candidates.sort(key=lambda x: (x[1], -self.word_freq.get(x[0], 0)))
-        return [candidate for candidate, distance in candidates[:max_suggestions]]
-    
-    def check_text(self, text):
-        """Проверяет текст"""
-        # Токенизация грузинского текста
-        words = re.findall(r'[\u10A0-\u10FF]+', text)
-        errors = []
+        print(f"✅ Резервная модель создана: {len(basic_words)} слов")
+        return True
         
-        for word in words:
-            if len(word) > 1 and not self.is_correct(word):  # Игнорируем слишком короткие слова
-                suggestions = self.suggest_corrections(word)
-                errors.append({
-                    'word': word,
-                    'suggestions': suggestions,
-                    'start_pos': text.find(word),
-                    'end_pos': text.find(word) + len(word)
-                })
+    except Exception as e:
+        print(f"❌ Ошибка создания резервной модели: {e}")
+        return False
+
+def test_models():
+    """Тестирование созданных моделей"""
+    print_step(7, "ТЕСТИРОВАНИЕ МОДЕЛЕЙ")
+    
+    test_cases = [
+        "გამარჯობა როგორ ხარ",
+        "გამარჯაბა როგოთ ხართ",
+        "ეს არის სატესტო ტექსტი",
+        "პროგრამა კომპიუტერი ტექნოლოგია"
+    ]
+    
+    try:
+        from advanced_spellchecker import AdvancedGeorgianSpellChecker
         
-        return errors
-
-# Создаем экземпляр спеллчекера
-spell_checker = WebSpellChecker()
-
-@app.route('/')
-def index():
-    """Главная страница"""
-    return """
-    <!DOCTYPE html>
-    <html lang="ka">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>🇬🇪 Грузинский Спеллчекер</title>
-        <style>
-            * {
-                margin: 0;
-                padding: 0;
-                box-sizing: border-box;
-            }
-            
-            body {
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                min-height: 100vh;
-                padding: 20px;
-            }
-            
-            .container {
-                max-width: 800px;
-                margin: 0 auto;
-                background: white;
-                border-radius: 15px;
-                box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-                overflow: hidden;
-            }
-            
-            .header {
-                background: linear-gradient(135deg, #2c3e50, #34495e);
-                color: white;
-                padding: 30px;
-                text-align: center;
-            }
-            
-            .header h1 {
-                font-size: 2.5em;
-                margin-bottom: 10px;
-            }
-            
-            .header p {
-                opacity: 0.9;
-                font-size: 1.1em;
-            }
-            
-            .content {
-                padding: 30px;
-            }
-            
-            .textarea-container {
-                margin-bottom: 20px;
-            }
-            
-            textarea {
-                width: 100%;
-                height: 200px;
-                padding: 15px;
-                border: 2px solid #e0e0e0;
-                border-radius: 10px;
-                font-size: 16px;
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                resize: vertical;
-                transition: border-color 0.3s;
-            }
-            
-            textarea:focus {
-                outline: none;
-                border-color: #667eea;
-            }
-            
-            .button-group {
-                display: flex;
-                gap: 10px;
-                margin-bottom: 20px;
-            }
-            
-            button {
-                padding: 12px 24px;
-                border: none;
-                border-radius: 8px;
-                font-size: 16px;
-                font-weight: 600;
-                cursor: pointer;
-                transition: all 0.3s;
-            }
-            
-            .check-btn {
-                background: #27ae60;
-                color: white;
-                flex: 2;
-            }
-            
-            .check-btn:hover {
-                background: #219a52;
-                transform: translateY(-2px);
-            }
-            
-            .clear-btn {
-                background: #e74c3c;
-                color: white;
-                flex: 1;
-            }
-            
-            .clear-btn:hover {
-                background: #c0392b;
-                transform: translateY(-2px);
-            }
-            
-            .results {
-                margin-top: 20px;
-            }
-            
-            .error-item {
-                background: #fff3cd;
-                border: 1px solid #ffeaa7;
-                border-radius: 8px;
-                padding: 15px;
-                margin-bottom: 10px;
-                animation: fadeIn 0.5s;
-            }
-            
-            .error-word {
-                font-weight: bold;
-                color: #e74c3c;
-                font-size: 1.1em;
-            }
-            
-            .suggestions {
-                margin-top: 8px;
-            }
-            
-            .suggestion {
-                display: inline-block;
-                background: #3498db;
-                color: white;
-                padding: 5px 12px;
-                margin: 2px;
-                border-radius: 20px;
-                font-size: 0.9em;
-                cursor: pointer;
-                transition: background 0.3s;
-            }
-            
-            .suggestion:hover {
-                background: #2980b9;
-            }
-            
-            .no-errors {
-                text-align: center;
-                padding: 30px;
-                color: #27ae60;
-                font-size: 1.2em;
-            }
-            
-            .stats {
-                background: #f8f9fa;
-                padding: 15px;
-                border-radius: 8px;
-                margin-top: 20px;
-                text-align: center;
-                font-size: 0.9em;
-                color: #6c757d;
-            }
-            
-            @keyframes fadeIn {
-                from { opacity: 0; transform: translateY(10px); }
-                to { opacity: 1; transform: translateY(0); }
-            }
-            
-            .highlight {
-                background-color: #ffeb3b;
-                padding: 2px 4px;
-                border-radius: 3px;
-            }
-            
-            @media (max-width: 600px) {
-                .container {
-                    margin: 10px;
-                }
-                
-                .header h1 {
-                    font-size: 2em;
-                }
-                
-                .button-group {
-                    flex-direction: column;
-                }
-            }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>🇬🇪 ქართული მართლწერის შემოწმება</h1>
-                <p>გადაამოწმეთ თქვენი ქართული ტექსტი</p>
-            </div>
-            
-            <div class="content">
-                <div class="textarea-container">
-                    <textarea 
-                        id="textInput" 
-                        placeholder="ჩაწერეთ ქართული ტექსტი აქ... 
-მაგალითი: გამარჯაბა როგოთ ხართ დღეს კარგი ამინდია"
-                    ></textarea>
-                </div>
-                
-                <div class="button-group">
-                    <button class="check-btn" onclick="checkText()">
-                        🔍 შემოწმება
-                    </button>
-                    <button class="clear-btn" onclick="clearText()">
-                        🗑️ გასუფთავება
-                    </button>
-                </div>
-                
-                <div id="results" class="results">
-                    <div class="no-errors" id="noErrors" style="display: none;">
-                        ✅ ტექსტში შეცდომები არ არის!
-                    </div>
-                </div>
-                
-                <div class="stats">
-                    სისტემა შეიცავს <strong id="wordCount">""" + str(len(spell_checker.vocabulary)) + """</strong> სიტყვას
-                </div>
-            </div>
-        </div>
-
-        <script>
-            let originalText = '';
-            
-            function checkText() {
-                const text = document.getElementById('textInput').value;
-                originalText = text;
-                
-                if (!text.trim()) {
-                    alert('გთხოვთ, ჩაწერეთ ტექსტი!');
-                    return;
-                }
-                
-                // Показываем загрузку
-                const resultsDiv = document.getElementById('results');
-                resultsDiv.innerHTML = '<div style="text-align: center; padding: 20px; color: #667eea;">⏳ მიმდინარეობს შემოწმება...</div>';
-                
-                fetch('/check', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ text: text })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    displayResults(data.errors, text);
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    resultsDiv.innerHTML = '<div style="color: red; text-align: center;">❌ შეცდომა მოხდა შემოწმებისას</div>';
-                });
-            }
-            
-            function displayResults(errors, originalText) {
-                const resultsDiv = document.getElementById('results');
-                const noErrorsDiv = document.getElementById('noErrors');
-                
-                if (errors.length === 0) {
-                    noErrorsDiv.style.display = 'block';
-                    resultsDiv.innerHTML = '';
-                    return;
-                }
-                
-                noErrorsDiv.style.display = 'none';
-                
-                let html = '<h3 style="margin-bottom: 15px; color: #2c3e50;">📋 ნაპოვნი შეცდომები:</h3>';
-                
-                errors.forEach(error => {
-                    html += `
-                        <div class="error-item">
-                            <div class="error-word">"${error.word}"</div>
-                            <div class="suggestions">
-                                <strong>შემოთავაზებები:</strong> 
-                    `;
-                    
-                    error.suggestions.forEach(suggestion => {
-                        html += `<span class="suggestion" onclick="replaceWord('${error.word}', '${suggestion}')">${suggestion}</span>`;
-                    });
-                    
-                    html += `
-                            </div>
-                        </div>
-                    `;
-                });
-                
-                resultsDiv.innerHTML = html;
-            }
-            
-            function replaceWord(oldWord, newWord) {
-                const textarea = document.getElementById('textInput');
-                let text = originalText;
-                
-                // Заменяем только первое вхождение
-                text = text.replace(oldWord, newWord);
-                textarea.value = text;
-                originalText = text;
-                
-                // Перепроверяем текст
-                checkText();
-            }
-            
-            function clearText() {
-                document.getElementById('textInput').value = '';
-                document.getElementById('results').innerHTML = '';
-                document.getElementById('noErrors').style.display = 'none';
-                originalText = '';
-            }
-            
-            // Автоматическая проверка при вводе (с задержкой)
-            let checkTimeout;
-            document.getElementById('textInput').addEventListener('input', function() {
-                clearTimeout(checkTimeout);
-                checkTimeout = setTimeout(() => {
-                    if (this.value.length > 10) {
-                        checkText();
-                    }
-                }, 1000);
-            });
-            
-            // Загружаем пример текста при загрузке страницы
-            window.addEventListener('load', function() {
-                const exampleText = "გამარჯაბა როგოთ ხართ დღეს კარგი ამინდია თბილისი ლამაზი ქალაქია";
-                document.getElementById('textInput').value = exampleText;
-                originalText = exampleText;
-            });
-        </script>
-    </body>
-    </html>
-    """
-
-@app.route('/check', methods=['POST'])
-def check_text():
-    """API endpoint для проверки текста"""
-    data = request.get_json()
-    text = data.get('text', '')
-    
-    errors = spell_checker.check_text(text)
-    
-    return jsonify({
-        'errors': errors,
-        'total_errors': len(errors),
-        'text_length': len(text)
-    })
-
-@app.route('/add_word', methods=['POST'])
-def add_word():
-    """Добавление нового слова в словарь"""
-    data = request.get_json()
-    word = data.get('word', '')
-    
-    if word and all('\u10A0' <= char <= '\u10FF' for char in word):
-        spell_checker.vocabulary.add(word)
-        spell_checker.word_freq[word] = spell_checker.word_freq.get(word, 0) + 1
-        spell_checker.save_model("spellchecker_model.pkl")
+        # Пробуем загрузить объединенную модель
+        merged_path = project_root / "4_advanced" / "merged_georgian_spellchecker.pkl"
+        if merged_path.exists():
+            model = AdvancedGeorgianSpellChecker()
+            model.load_advanced_model(str(merged_path))
+            model_name = "Объединенная"
+        else:
+            # Пробуем продвинутую модель
+            advanced_path = project_root / "4_advanced" / "advanced_georgian_spellchecker.pkl"
+            if advanced_path.exists():
+                model = AdvancedGeorgianSpellChecker()
+                model.load_advanced_model(str(advanced_path))
+                model_name = "Продвинутая"
+            else:
+                # Пробуем базовую модель
+                basic_path = project_root / "2_basis" / "georgian_spellchecker.pkl"
+                if basic_path.exists():
+                    from georgian_spellchecker import GeorgianSpellChecker
+                    model = GeorgianSpellChecker()
+                    model.load_model(str(basic_path))
+                    model_name = "Базовая"
+                else:
+                    print("❌ Ни одна модель не найдена для тестирования!")
+                    return False
         
-        return jsonify({
-            'success': True,
-            'message': f'სიტყვა "{word}" დაემატა ლექსიკონს',
-            'total_words': len(spell_checker.vocabulary)
-        })
-    
-    return jsonify({
-        'success': False,
-        'message': 'არასწორი სიტყვა'
-    }), 400
+        print(f"🧪 Тестирование {model_name} модели:")
+        print(f"📊 Слов в словаре: {len(model.vocabulary)}")
+        
+        for text in test_cases:
+            print(f"\n📝 Текст: '{text}'")
+            errors = model.check_text(text)
+            
+            if errors:
+                for word, suggestions in errors:
+                    print(f"   ❌ '{word}' -> {suggestions[:3]}")
+            else:
+                print("   ✅ Ошибок не найдено")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Ошибка тестирования: {e}")
+        return False
 
-@app.route('/stats')
-def get_stats():
-    """Статистика словаря"""
-    return jsonify({
-        'total_words': len(spell_checker.vocabulary),
-        'most_common': dict(spell_checker.word_freq.most_common(10))
-    })
-
-if __name__ == '__main__':
-    print("🚀 Запуск веб-интерфейса грузинского спеллчекера...")
-    print("📍 Адрес: http://localhost:5000")
-    print("📍 Адрес для сети: http://0.0.0.0:5000")
-    print("🛑 Для остановки нажмите Ctrl+C")
+def main():
+    """Главная функция"""
+    print("🎯 ЗАПУСК ПОЛНОЙ СБОРКИ ГРУЗИНСКОГО СПЕЛЛЧЕКЕРА")
+    print("=" * 60)
     
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    start_time = time.time()
+    
+    try:
+        # Создаем необходимые директории
+        ensure_directories()
+        
+        # Шаг 1: Сбор корпуса
+        if not collect_corpus():
+            print("⚠️  Пропускаем сбор корпуса...")
+        
+        # Шаг 2: Построение базовой модели
+        if not build_basic_model():
+            print("❌ Ошибка построения базовой модели!")
+            return
+        
+        # Шаг 3: Расширение корпуса (опционально)
+        expand_corpus()
+        
+        # Шаг 4: Построение продвинутой модели
+        if not build_advanced_model():
+            print("⚠️  Продвинутая модель не построена, используем базовую...")
+        
+        # Шаг 5: Объединение моделей
+        if not merge_models():
+            print("⚠️  Объединение моделей не удалось...")
+        
+        # Шаг 6: Резервная модель
+        create_fallback_model()
+        
+        # Шаг 7: Тестирование
+        test_models()
+        
+        # Итоговая статистика
+        end_time = time.time()
+        execution_time = end_time - start_time
+        
+        print(f"\n{'='*60}")
+        print("🎉 СБОРКА ЗАВЕРШЕНА УСПЕШНО!")
+        print(f"{'='*60}")
+        print(f"⏱️  Время выполнения: {execution_time:.2f} секунд")
+        print(f"📁 Проект готов к использованию!")
+        print(f"\n🚀 Для запуска веб-интерфейса:")
+        print(f"   python run_web_simple.py")
+        print(f"   или")
+        print(f"   cd 5_web && python web_interface.py")
+        print(f"\n🌐 Затем откройте: http://localhost:5000")
+        print(f"{'='*60}")
+        
+    except KeyboardInterrupt:
+        print(f"\n⏹️  Сборка прервана пользователем")
+    except Exception as e:
+        print(f"\n❌ Критическая ошибка: {e}")
+        import traceback
+        traceback.print_exc()
+
+if __name__ == "__main__":
+    main()

@@ -345,3 +345,56 @@ if __name__ == "__main__":
         build_advanced_spellchecker()
     else:
         test_advanced_spellchecker()
+def build_complete_advanced_model(self, corpus_path: str = None, output_path: str = "advanced_georgian_spellchecker.pkl"):
+    """Полное построение продвинутой модели"""
+    print("🧠 Построение продвинутой модели...")
+    
+    # Сначала загружаем базовую модель если есть
+    basic_model_path = "../2_basis/georgian_spellchecker.pkl"
+    if Path(basic_model_path).exists():
+        print("📥 Загрузка базовой модели...")
+        self.load_model(basic_model_path)
+    elif corpus_path:
+        # Строим с нуля из корпуса
+        print("📚 Обработка корпуса...")
+        self.load_corpus(corpus_path)
+    else:
+        print("⚠️  Базовая модель не найдена, ищем корпус...")
+        # Поиск корпуса
+        possible_corpus_paths = [
+            "../1_collect/corpus",
+            "1_collect/corpus",
+            "corpus"
+        ]
+        
+        for path in possible_corpus_paths:
+            if Path(path).exists():
+                print(f"📚 Найден корпус: {path}")
+                self.load_corpus(path)
+                break
+        else:
+            print("❌ Корпус не найден!")
+            return False
+    
+    # Строим N-gram модели
+    print("🔨 Построение N-gram моделей...")
+    if corpus_path:
+        self.build_advanced_ngram_models(corpus_path)
+    else:
+        # Используем корпус из базовой модели
+        corpus_path = "../1_collect/corpus"
+        if Path(corpus_path).exists():
+            self.build_advanced_ngram_models(corpus_path)
+        else:
+            print("⚠️  Корпус для N-gram не найден, пропускаем...")
+    
+    # Сохраняем продвинутую модель
+    self.save_advanced_model(output_path)
+    print(f"✅ Продвинутая модель сохранена: {output_path}")
+    print(f"📊 Слов в словаре: {len(self.vocabulary)}")
+    if hasattr(self, 'bigram_model'):
+        print(f"📈 Биграмм: {sum(len(v) for v in self.bigram_model.values())}")
+    if hasattr(self, 'trigram_model'):
+        print(f"📈 Триграмм: {sum(len(v) for v in self.trigram_model.values())}")
+    
+    return True

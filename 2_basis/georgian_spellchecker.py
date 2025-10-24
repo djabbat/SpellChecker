@@ -600,3 +600,46 @@ if __name__ == "__main__":
         demo()
     else:
         main()
+def build_complete_model(self, corpus_path: str = None, output_path: str = "georgian_spellchecker.pkl"):
+    """Полное построение модели с обработкой корпуса"""
+    print("🏗️ Построение полной модели...")
+    
+    if corpus_path:
+        # Обрабатываем корпус
+        self.load_corpus(corpus_path)
+    else:
+        # Используем очищенный корпус если есть
+        cleaned_path = "cleaned_corpus"
+        if Path(cleaned_path).exists():
+            self.train_from_cleaned_corpus(cleaned_path)
+        else:
+            # Ищем корпус в стандартных местах
+            possible_corpus_paths = [
+                "1_collect/corpus",
+                "../1_collect/corpus", 
+                "corpus"
+            ]
+            
+            for path in possible_corpus_paths:
+                if Path(path).exists():
+                    print(f"📚 Найден корпус: {path}")
+                    self.load_corpus(path)
+                    break
+            else:
+                print("⚠️  Корпус не найден, создаем базовый словарь...")
+                # Создаем базовый словарь
+                basic_words = {
+                    'გამარჯობა', 'როგორ', 'ხარ', 'დღეს', 'კარგი', 'ამინდი', 
+                    'საქართველო', 'თბილისი', 'ენა', 'პროგრამა', 'კომპიუტერი'
+                }
+                self.vocabulary = basic_words
+                self.word_freq = {word: 1 for word in basic_words}
+    
+    # Строим N-gram модели
+    self.build_ngram_model(2)
+    self.build_ngram_model(3)
+    
+    # Сохраняем модель
+    self.save_model(output_path)
+    print(f"✅ Модель сохранена: {output_path}")
+    print(f"📊 Слов в словаре: {len(self.vocabulary)}")
