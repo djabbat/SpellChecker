@@ -53,7 +53,6 @@ SpellChecker/
 │   ├── web_interface.py
 │   └── __init__.py
 ├── run_web.py                 # Web server launcher
-├── run_web_simple.py          # Simple launcher
 ├── start_1-4.py              # Model training script
 └── ReadMe.md
 
@@ -71,7 +70,7 @@ python web_interface.py
 #### Method 2: Using Launcher
 
 ```bash
-python run_web_simple.py
+python run_web.py
 ```
 
 Then open your browser and go to: `http://localhost:5000`
@@ -162,7 +161,6 @@ SpellChecker/
 │   ├── web_interface.py
 │   └── __init__.py
 ├── run_web.py                 # Запуск веб-сервера
-├── run_web_simple.py          # Простой запуск
 ├── start_1-4.py              # Скрипт обучения моделей
 └── ReadMe.md
 ```
@@ -179,7 +177,7 @@ python web_interface.py
 #### Способ 2: Использование лаунчера
 
 ```bash
-python run_web_simple.py
+python run_web.py
 ```
 
 Затем откройте браузер и перейдите по адресу: `http://localhost:5000`
@@ -269,7 +267,6 @@ pip install flask beautifulsoup4 requests
 │   ├── web_interface.py
 │   └── __init__.py
 ├── run_web.py                 # ვებ სერვერის გამშვები
-├── run_web_simple.py          # მარტივი გამშვები
 ├── start_1-4.py              # მოდელების სასწავლო სკრიპტი
 └── ReadMe.md
 ```
@@ -286,7 +283,7 @@ python web_interface.py
 #### მეთოდი 2: გამშვების გამოყენება
 
 ```bash
-python run_web_simple.py
+python run_web.py
 ```
 
 შემდეგ გახსენით ბრაუზერი და გადადით მისამართზე: `http://localhost:5000`
@@ -340,7 +337,7 @@ cd 5_web
 python web_interface.py
 
 # Method 2: Using launcher  
-python run_web_simple.py
+python run_web.py
 ```
 
 Then open: **<http://localhost:5000>**
@@ -372,3 +369,7 @@ pip install flask beautifulsoup4 requests
 - `3_expand/` - Corpus expansion tools
 - `4_advanced/` - Advanced N-gram models
 - `5_web/` - Web interface
+
+git add .
+git commit -m "feat: Describe your changes"
+git push origin main
