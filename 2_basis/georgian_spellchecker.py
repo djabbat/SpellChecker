@@ -64,8 +64,9 @@ class GeorgianSpellChecker:
         total_files = 0
         total_words = 0
         
-        # Обрабатываем все txt файлы в корпусе
-        txt_files = list(corpus_dir.glob("**/*.txt"))
+        # Обрабатываем все txt файлы в корпусе - ИСПРАВЛЕННАЯ ЧАСТЬ
+        txt_files = list(corpus_dir.rglob("*.txt"))  # Рекурсивный поиск
+        
         if not txt_files:
             print(f"В папке {corpus_dir} не найдено txt файлов!")
             return
@@ -249,7 +250,7 @@ class CorpusProcessor:
         all_words = Counter()
         total_files = 0
         
-        txt_files = list(corpus_dir.glob("**/*.txt"))
+        txt_files = list(corpus_dir.rglob("*.txt"))  # Рекурсивный поиск
         if not txt_files:
             print(f"В папке {corpus_dir} не найдено txt файлов!")
             return
@@ -305,6 +306,9 @@ def find_corpus_path(corpus_path: str) -> Path:
     """Находит путь к корпусу, проверяя разные варианты"""
     paths_to_try = [
         Path(corpus_path),
+        Path("corpus"),  # ეს იპოვის თქვენს კორპუსს!
+        Path("../1_collect/corpus"),
+        Path("1_collect/corpus"), 
         Path("..") / corpus_path,
         Path(__file__).parent.parent / corpus_path,
         Path(__file__).parent / corpus_path,
@@ -313,14 +317,14 @@ def find_corpus_path(corpus_path: str) -> Path:
     for path in paths_to_try:
         if path.exists():
             print(f"Корпус найден: {path}")
-            return path
+            # დავაბრუნოთ აბსოლუტური პათი
+            return path.resolve()
     
-    # Если корпус не найден, создаем тестовый
+    # თუ კორპუსი არ მოიძებნა, შევქმნათ ტესტური
     print("Корпус не найден. Создаем тестовый корпус...")
     test_corpus = Path("test_corpus")
     test_corpus.mkdir(exist_ok=True)
     
-    # Создаем тестовые файлы с грузинским текстом
     test_texts = [
         "გამარჯობა როგორ ხარ დღეს კარგი ამინდია",
         "საქართველო ქართული ენა პროგრამირება კომპიუტერი",
@@ -338,43 +342,32 @@ def find_corpus_path(corpus_path: str) -> Path:
 def build_complete_spellchecker():
     """Полная сборка спеллчекера из корпуса"""
     
-    # Пути к данным
-    CORPUS_PATH = "1.Collect a text corpus/corpus"
+    # შევცვალოთ პათები
+    CORPUS_PATH = "corpus"  # ახლა ეს იმუშავებს!
     CLEANED_CORPUS_PATH = "cleaned_corpus"
     MODEL_PATH = "georgian_spellchecker.pkl"
     
     print("=== ПОЛНАЯ СБОРКА ГРУЗИНСКОГО СПЕЛЛЧЕКЕРА ===")
     
-    # Создаем спеллчекер
+    # შევქმნათ სპელჩეკერი
     spell_checker = GeorgianSpellChecker()
     
-    # Находим или создаем корпус
+    # ვიპოვოთ კორპუსი
     corpus_dir = find_corpus_path(CORPUS_PATH)
     
-    # Проверяем наличие очищенного корпуса
-    cleaned_corpus_exists = False
-    cleaned_paths_to_check = [
-        Path(CLEANED_CORPUS_PATH),
-        Path("..") / CLEANED_CORPUS_PATH,
-        Path(__file__).parent.parent / CLEANED_CORPUS_PATH
-    ]
+    print(f"1. Используем корпус: {corpus_dir}")
     
-    for cleaned_path in cleaned_paths_to_check:
-        if cleaned_path.exists():
-            CLEANED_CORPUS_PATH = str(cleaned_path)
-            cleaned_corpus_exists = True
-            print(f"1. Используем очищенный корпус: {cleaned_path}")
-            spell_checker.train_from_cleaned_corpus(CLEANED_CORPUS_PATH)
-            break
+    # ვამოწმებთ ფაილებს
+    txt_files = list(corpus_dir.rglob("*.txt"))  # Рекурсивный поиск
+    print(f"   Найдено txt файлов: {len(txt_files)}")
+    for f in txt_files[:5]:  # Покажем только первые 5 файлов
+        print(f"   - {f.name} ({f.stat().st_size} байт)")
     
-    if not cleaned_corpus_exists:
-        print("1. Обрабатываем исходный корпус...")
-        CorpusProcessor.process_existing_corpus(str(corpus_dir), "processed_corpus")
-        spell_checker.load_corpus(str(corpus_dir))
+    # ვტვირთავთ კორპუსს
+    spell_checker.load_corpus(str(corpus_dir))
     
     if len(spell_checker.vocabulary) == 0:
         print("ВНИМАНИЕ: Словарь пуст! Добавляем тестовые слова...")
-        # Добавляем базовый словарь
         basic_words = {
             'გამარჯობა', 'როგორ', 'ხარ', 'დღეს', 'კარგი', 'ამინდი', 
             'საქართველო', 'თბილისი', 'ენა', 'პროგრამა', 'კომპიუტერი',
@@ -386,23 +379,22 @@ def build_complete_spellchecker():
     
     print(f"2. Словарь содержит {len(spell_checker.vocabulary)} слов")
     
-    # Строим N-gram модели
+    # ვაშენებთ N-gram მოდელებს
     print("3. Строим языковые модели...")
     spell_checker.build_ngram_model(2)
     spell_checker.build_ngram_model(3)
     
-    # Сохраняем модель
+    # ვინახავთ მოდელს
     print("4. Сохраняем модель...")
     spell_checker.save_model(MODEL_PATH)
     
-    # Создаем файлы для Hunspell
+    # ვქმნით Hunspell ფაილებს
     print("5. Создаем файлы для Hunspell...")
     try:
         create_hunspell_files(spell_checker.vocabulary, "hunspell_georgian")
     except Exception as e:
         print(f"Ошибка при создании Hunspell файлов: {e}")
         print("Пробуем альтернативный путь...")
-        # Альтернативный вариант
         hunspell_dir = Path("hunspell_output")
         hunspell_dir.mkdir(exist_ok=True)
         
@@ -419,7 +411,7 @@ def build_complete_spellchecker():
         
         print(f"Hunspell файлы созданы в: {hunspell_dir}")
     
-    # Тестируем модель
+    # ვტესტავთ მოდელს
     print("6. Тестируем модель...")
     test_words = ['გამარჯობა', 'გამარჯაბა', 'როგორ', 'როგოთ']
     print("\nТестовые проверки:")
@@ -501,7 +493,7 @@ def demo():
 def main():
     """Основная функция с аргументами командной строки"""
     parser = argparse.ArgumentParser(description='Грузинский спеллчекер')
-    parser.add_argument('--corpus', default='1.Collect a text corpus/corpus', 
+    parser.add_argument('--corpus', default='corpus', 
                        help='Путь к корпусу текстов')
     parser.add_argument('--cleaned-corpus', default='cleaned_corpus',
                        help='Путь к очищенному корпусу')
@@ -600,6 +592,7 @@ if __name__ == "__main__":
         demo()
     else:
         main()
+
 def build_complete_model(self, corpus_path: str = None, output_path: str = "georgian_spellchecker.pkl"):
     """Полное построение модели с обработкой корпуса"""
     print("🏗️ Построение полной модели...")
